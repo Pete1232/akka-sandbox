@@ -32,14 +32,16 @@ class DeviceGroup(groupId: String) extends Actor with ActorLogging {
 
   import DeviceGroup._
 
-  var deviceIdToActor = Map.empty[String, ActorRef]
-  var actorToDeviceId = Map.empty[ActorRef, String]
-
   override def preStart(): Unit = log.info("DeviceGroup {} started", groupId)
 
   override def postStop(): Unit = log.info("DeviceGroup {} stopped", groupId)
 
   override def receive: Receive = {
+    receiveWithDevices(Map.empty[String, ActorRef], Map.empty[ActorRef, String])
+  }
+
+  private def receiveWithDevices(deviceIdToActor: Map[String, ActorRef],
+                                 actorToDeviceId: Map[ActorRef, String]): Receive = {
     case trackMsg@RequestTrackDevice(`groupId`, _) ⇒
       deviceIdToActor.get(trackMsg.deviceId) match {
         case Some(deviceActor) ⇒
@@ -48,8 +50,12 @@ class DeviceGroup(groupId: String) extends Actor with ActorLogging {
           log.info("Creating device actor for {}", trackMsg.deviceId)
           val deviceActor: ActorRef = context.actorOf(Device.props(groupId, trackMsg.deviceId), s"device-${trackMsg.deviceId}")
           context.watch(deviceActor)
-          deviceIdToActor += trackMsg.deviceId -> deviceActor
-          actorToDeviceId += deviceActor -> trackMsg.deviceId
+
+          context.become(receiveWithDevices(
+            deviceIdToActor + (trackMsg.deviceId -> deviceActor),
+            actorToDeviceId + (deviceActor -> trackMsg.deviceId)
+          ))
+
           deviceActor forward trackMsg
       }
     case RequestAllTemperatures(requestId) ⇒
@@ -70,7 +76,9 @@ class DeviceGroup(groupId: String) extends Actor with ActorLogging {
     case Terminated(deviceActor) ⇒
       val deviceId = actorToDeviceId(deviceActor)
       log.info("Device actor for {} has been terminated", deviceId)
-      actorToDeviceId -= deviceActor
-      deviceIdToActor -= deviceId
+      context.become(receiveWithDevices(
+        deviceIdToActor - deviceId,
+        actorToDeviceId - deviceActor
+      ))
   }
 }

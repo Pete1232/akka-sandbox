@@ -20,14 +20,16 @@ class Device(groupId: String, deviceId: String) extends Actor with ActorLogging 
 
   import Device._
 
-  var lastTemperatureReading: Option[Double] = None
-
   override def preStart(): Unit = log.info("Device actor {}-{} started", groupId, deviceId)
 
   override def postStop(): Unit = log.info("Device actor {}-{} stopped", groupId, deviceId)
 
 
   override def receive: Receive = {
+    receiveWithTemperature(None)
+  }
+
+  private def receiveWithTemperature(lastTemperatureReading: Option[Double]): Receive = {
     case DeviceManager.RequestTrackDevice(`groupId`, `deviceId`) ⇒
       sender() ! DeviceManager.DeviceRegistered
 
@@ -38,7 +40,7 @@ class Device(groupId: String, deviceId: String) extends Actor with ActorLogging 
       )
     case RecordTemperature(id, value) ⇒
       log.info("Recorded temperature reading {} with {}", value, id)
-      lastTemperatureReading = Some(value)
+      context.become(receiveWithTemperature(Some(value)))
       sender() ! TemperatureRecorded(id)
     case ReadTemperature(id) ⇒
       sender() ! RespondTemperature(id, lastTemperatureReading)

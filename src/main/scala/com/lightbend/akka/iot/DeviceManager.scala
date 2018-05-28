@@ -23,14 +23,16 @@ class DeviceManager extends Actor with ActorLogging {
 
   import DeviceManager._
 
-  var groupIdToActor = Map.empty[String, ActorRef]
-  var actorToGroupId = Map.empty[ActorRef, String]
-
   override def preStart(): Unit = log.info("DeviceManager started")
 
   override def postStop(): Unit = log.info("DeviceManager stopped")
 
   override def receive: Receive = {
+    receiveWithDeviceGroups(Map.empty, Map.empty)
+  }
+
+  private def receiveWithDeviceGroups(groupIdToActor: Map[String, ActorRef],
+                                      actorToGroupId: Map[ActorRef, String]): Receive = {
     case trackMsg@RequestTrackDevice(groupId, _) ⇒
       groupIdToActor.get(groupId) match {
         case Some(ref) ⇒
@@ -39,9 +41,13 @@ class DeviceManager extends Actor with ActorLogging {
           log.info("Creating device group actor for {}", groupId)
           val groupActor: ActorRef = context.actorOf(DeviceGroup.props(groupId), "group-" + groupId)
           context.watch(groupActor)
+
+          context.become(receiveWithDeviceGroups(
+            groupIdToActor + (groupId -> groupActor),
+            actorToGroupId + (groupActor -> groupId)
+          ))
+
           groupActor forward trackMsg
-          groupIdToActor += groupId -> groupActor
-          actorToGroupId += groupActor -> groupId
       }
     case RequestGroupList(requestId) ⇒
       sender() ! ReplyGroupList(requestId, groupIdToActor.keySet)
@@ -50,7 +56,10 @@ class DeviceManager extends Actor with ActorLogging {
     case Terminated(groupActor) ⇒
       val groupId = actorToGroupId(groupActor)
       log.info("Device group actor for {} has been terminated", groupId)
-      actorToGroupId -= groupActor
-      groupIdToActor -= groupId
+
+      context.become(receiveWithDeviceGroups(
+        groupIdToActor - groupId,
+        actorToGroupId - groupActor
+      ))
   }
 }
